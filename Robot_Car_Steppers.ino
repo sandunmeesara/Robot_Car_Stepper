@@ -16,6 +16,8 @@ AccelStepper stepper2(MOTOR_INTERFACE_TYPE, 6, 7, 8, 9);
 bool isMoving = false;
 unsigned long previousMillis = 0; // Stores last time event occurred
 const long interval = 100; // Time interval in milliseconds (1 second)
+bool isLeftBlocked = false;
+bool isRightBlocked = false;
 
 // Steps per degree (4096 steps per revolution / 360 degrees)
 const float STEPS_PER_DEGREE = 4096.0 / 360.0;
@@ -48,16 +50,32 @@ void loop()
       Serial.println(" cm");
 
       if(distance <= 20){
-        for (pos = 40; pos <= 140; pos += 1) { // goes from 0 degrees to 180 degrees
+        for (pos = 90; pos <= 140; pos += 1) { // goes from 0 degrees to 180 degrees
           // in steps of 1 degree
           myservo.write(pos);              // tell servo to go to position in variable 'pos'
           delay(15);                       // waits 15 ms for the servo to reach the position
+          if(measure_distance() < 40){
+            isLeftBlocked = true;
+            Serial.println("Left is blocked!");
+            // turnLeftAngle(pos);
+            break;
+          }
         }
-        for (pos = 140; pos >= 0; pos -= 1) { // goes from 180 degrees to 0 degrees
-          myservo.write(pos);              // tell servo to go to position in variable 'pos'
-          delay(15);                       // waits 15 ms for the servo to reach the position
+        if(isLeftBlocked){
+          for (pos = 0; pos >= 90; pos -= 1) { // goes from 180 degrees to 0 degrees
+            myservo.write(pos);              // tell servo to go to position in variable 'pos'
+            delay(15);                       // waits 15 ms for the servo to reach the position
+            if(measure_distance() < 40){
+              isRightBlocked = true;
+              Serial.println("Right is blocked!");
+              // turnRightAngle(pos);
+              break;
+            }
+          }
         }
       }
+      isLeftBlocked = false;
+      isRightBlocked =false;
     }
 
     // Check for serial commands
