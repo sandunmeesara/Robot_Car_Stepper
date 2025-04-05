@@ -15,7 +15,9 @@ bool isRightBlocked = false;
 int pos = 0;    // variable to store the servo position
 
 // Steps per degree (4096 steps per revolution / 360 degrees)
-const float STEPS_PER_DEGREE = 4096.0 / 360.0;
+const float STEPS_PER_DEGREE = 2048.0 / 360.0;
+const float distance_for_one_revolution = 21;
+const int steps_per_one_revolution = 2048;
 
 //--------------------------------------- Global Variables Section End --------------------------------------
 
@@ -71,38 +73,63 @@ void loop()
       Serial.println(" cm");
 
       // Check the distance is less than the pre given value
-      if(distance <= 20){
-
-        // Check the left side of the car for a free space to move
-        for (pos = 90; pos <= 140; pos += 1) { // goes from 0 degrees to 180 degrees
+      if(distance <= 30){
+        // Stop motors
+        stopMotors();
+        //Check the left side of the car for a free space to move
+        for (pos = 90; pos <= 180; pos += 1) { // goes from 90 degrees to 140 degrees
           myservo.write(pos);              // tell servo to go to position in variable 'pos'
-          delay(15);                       // waits 15 ms for the servo to reach the position
+          delay(100);                       // waits 15 ms for the servo to reach the position
 
-          if(measure_distance() < 40){
-            isLeftBlocked = true;
-            Serial.println("Left is blocked!");
-            // turnLeftAngle(pos);
+          if(measure_distance() > 60){
+            isLeftBlocked = false;
+            Serial.println("Left is Okay!");
+
+            float angle = pos -(pos/2);
+            turnLeftAngle(angle);
+            int distance_to_go_after_turn = abs(((distance / cos(angle)) / distance_for_one_revolution) * steps_per_one_revolution);
+            move_Blocking(distance_to_go_after_turn);
+            turnRightAngle(angle*2);
+            move_Blocking(distance_to_go_after_turn);
+            turnLeftAngle(angle);
+
             break;
+          }else{
+            isLeftBlocked = true;
+            Serial.println("Left is Blocked!");
           }
         }
 
         // Check the right side of the car for a free space to move
         if(isLeftBlocked){
-          for (pos = 0; pos >= 90; pos -= 1) { // goes from 180 degrees to 0 degrees
+          for (pos = 90; pos >= 0; pos -= 1) { // goes from 90 degrees to 40 degrees
             myservo.write(pos);              // tell servo to go to position in variable 'pos'
-            delay(15);                       // waits 15 ms for the servo to reach the position
+            delay(100);                       // waits 15 ms for the servo to reach the position
 
-            if(measure_distance() < 40){
+            if(measure_distance() > 60){
+              isRightBlocked = false;
+              Serial.println("Right is okay!");
+
+              float angle = pos-(pos/2);
+              turnRightAngle(angle);
+              int distance_to_go_after_turn = abs(((distance / cos(angle)) / distance_for_one_revolution) * steps_per_one_revolution);
+              move_Blocking(distance_to_go_after_turn);
+              turnLeftAngle(angle*2);
+              move_Blocking(distance_to_go_after_turn);
+              turnRightAngle(angle);
+
+              break;
+            }else{
               isRightBlocked = true;
               Serial.println("Right is blocked!");
-              // turnRightAngle(pos);
-              break;
             }
           }
         }
       }
       isLeftBlocked = false;
       isRightBlocked =false;
+      myservo.write(90);     // tell servo to go to home position
+      delay(15); 
     }
 
   // Check for serial commands
@@ -124,7 +151,7 @@ void loop()
 // Function to execute the commands coming from the serial port
 void executeCommand(char command) {
   if (command == '1'){
-    moveForward();
+    moveForward(10000000);
   }else if(command == '2'){
     moveBackward();
   }else if(command == '3'){
@@ -142,9 +169,9 @@ void executeCommand(char command) {
 }
 
 // Function to move the car to forward
-void moveForward() {
-  stepper1.moveTo(1000000);
-  stepper2.moveTo(1000000);
+void moveForward(long steps) {
+  stepper1.moveTo(steps);
+  stepper2.moveTo(steps);
   isMoving = true;
 }
 
@@ -212,6 +239,16 @@ float measure_distance(){
   float distance = duration * 0.034 / 2;
 
   return distance;
+}
+
+// Blocking function to move relative distance
+void move_Blocking(long steps) {
+  stepper1.move(steps);
+  stepper2.move(steps);
+  while(stepper1.distanceToGo() != 0 && stepper2.distanceToGo() != 0) {
+    stepper1.run();
+    stepper2.run();
+  }
 }
 
 // --------------------------------------- Functions Section End ---------------------------------------------
