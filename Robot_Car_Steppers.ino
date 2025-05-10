@@ -4,6 +4,11 @@
 #define MOTOR_INTERFACE_TYPE 4
 #define TRIG_PIN A0  // Use A0 as a digital output
 #define ECHO_PIN A1  // Use A1 as a digital input
+#define RIGHT 1
+#define LEFT 0
+#define BLOCKED 1
+#define UNBLOCKED 0
+#define RESET 0 
 
 //--------------------------------------- Global Variables Section ------------------------------------------
 
@@ -49,94 +54,34 @@ void setup()
     // Stepper Motor configurations
     //Left Stepper
     stepper1.setMaxSpeed(1000.0);
-    stepper1.setAcceleration(1000.0);
+    stepper1.setAcceleration(5000.0);
     stepper1.moveTo(1000000); // This is the maximum distance left stepper motor will run 
     //Right Stepper
     stepper2.setMaxSpeed(1000.0);
-    stepper2.setAcceleration(1000.0);
+    stepper2.setAcceleration(5000.0);
     stepper2.moveTo(1000000); // This is the maximum distance right stepper motor will run
 }
 
 //----------------------------- Loop function ---------------------------------------
 void loop()
 {
-    unsigned long currentMillis = millis(); // Get current time
+  unsigned long currentMillis = millis(); // Get current time
 
-    // Check the time interval and execute the measuring functions
-    if (currentMillis - previousMillis >= interval) {
-      previousMillis = currentMillis; // Update last event time
+  // Check the time interval and execute the measuring functions
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis; // Update last event time
 
-      // Measure the distance
-      float distance = measure_distance();
-      Serial.print("Distance: ");
-      Serial.print(distance);
-      Serial.println(" cm");
+    // Measure the distance
+    float distance = measure_distance();
 
-      // Check the distance is less than the pre given value
-      if(distance <= 30){
-        // Stop motors
-        stopMotors();
-        //Check the left side of the car for a free space to move
-        for (pos = 90; pos <= 180; pos += 1) { // goes from 90 degrees to 140 degrees
-          myservo.write(pos);              // tell servo to go to position in variable 'pos'
-          delay(100);                       // waits 15 ms for the servo to reach the position
-
-          if(measure_distance() > 60){
-            isLeftBlocked = false;
-            Serial.println("Left is Okay!");
-
-            float angle = pos -(pos/2);
-            turnLeftAngle(angle);
-            int distance_to_go_after_turn = abs(((distance / cos(angle)) / distance_for_one_revolution) * steps_per_one_revolution);
-            move_Blocking(distance_to_go_after_turn);
-            turnRightAngle(angle*2);
-            move_Blocking(distance_to_go_after_turn);
-            turnLeftAngle(angle);
-
-            break;
-          }else{
-            isLeftBlocked = true;
-            Serial.println("Left is Blocked!");
-          }
-        }
-
-        // Check the right side of the car for a free space to move
-        if(isLeftBlocked){
-          for (pos = 90; pos >= 0; pos -= 1) { // goes from 90 degrees to 40 degrees
-            myservo.write(pos);              // tell servo to go to position in variable 'pos'
-            delay(100);                       // waits 15 ms for the servo to reach the position
-
-            if(measure_distance() > 60){
-              isRightBlocked = false;
-              Serial.println("Right is okay!");
-
-              float angle = pos-(pos/2);
-              turnRightAngle(angle);
-              int distance_to_go_after_turn = abs(((distance / cos(angle)) / distance_for_one_revolution) * steps_per_one_revolution);
-              move_Blocking(distance_to_go_after_turn);
-              turnLeftAngle(angle*2);
-              move_Blocking(distance_to_go_after_turn);
-              turnRightAngle(angle);
-
-              break;
-            }else{
-              isRightBlocked = true;
-              Serial.println("Right is blocked!");
-            }
-          }
-        }
-      }
-      isLeftBlocked = false;
-      isRightBlocked =false;
-      myservo.write(90);     // tell servo to go to home position
-      delay(15); 
+    // Check the distance is less than the pre given value
+    if(distance <= 30){
+      stopMotors();
+      avoidObstacles(distance); // Call the function to avoid obstacles
     }
-
-  // Check for serial commands
-  if (Serial.available() > 0) {
-    char command = Serial.read();
-    executeCommand(command);
   }
+
+  processSerialCommands();
 
   if (isMoving == true){
     stepper1.run();
@@ -147,6 +92,72 @@ void loop()
 //---------------------------------------- Main Body Section End ------------------------------------------------
 
 // --------------------------------------- Functions Section ---------------------------------------------
+
+void writeToServo(int pos){
+  myservo.write(pos);       
+  delay(50); 
+}
+
+void avoidObstacles(float distance){
+  for (pos = 90; pos <= 180; pos += 1) {
+    writeToServo(pos);
+    float angle = pos-(pos/2); // calculate angle
+    isLeftBlocked = checkDirection(LEFT,distance,angle);
+    if(isLeftBlocked == UNBLOCKED){
+      break;
+    }
+  }
+
+  if(isLeftBlocked == BLOCKED){
+    for (pos = 90; pos >= 0; pos -= 1) { // goes from 90 degrees to 40 degrees
+      writeToServo(pos);
+      float angle = pos-(pos/2); // calculate angle
+      isRightBlocked = checkDirection(RIGHT,distance,angle);
+      if(isRightBlocked == UNBLOCKED){
+        break;
+      }
+    }
+  }
+
+  isLeftBlocked = RESET;
+  isRightBlocked = RESET;
+  writeToServo(90);
+}
+
+bool checkDirection(bool direction,float distance,float angle){
+  /// Return: 0-Unblocked , 1-Blocked
+  int steps_to_go = distance_to_go_after_turn(distance, angle);
+  if(measure_distance() > 60){
+    if(direction == LEFT){
+      turnToAngle(angle, LEFT);
+      move_Blocking(steps_to_go);
+      turnToAngle(angle*2, RIGHT);
+      move_Blocking(steps_to_go);
+      turnToAngle(angle, LEFT);
+    }else{
+      turnToAngle(angle, RIGHT);
+      move_Blocking(steps_to_go);
+      turnToAngle(angle*2, LEFT);
+      move_Blocking(steps_to_go);
+      turnToAngle(angle, RIGHT);
+    }
+    return UNBLOCKED;
+  }else{
+    return BLOCKED;
+  }
+}
+
+int distance_to_go_after_turn(float distance,float angle){
+  return abs(((distance / cos(angle)) / distance_for_one_revolution) * steps_per_one_revolution);
+}
+
+// Function to process serial commands
+void processSerialCommands(){
+  if (Serial.available() > 0) {
+    char command = Serial.read();
+    executeCommand(command);
+  }
+}
 
 // Function to execute the commands coming from the serial port
 void executeCommand(char command) {
@@ -162,9 +173,9 @@ void executeCommand(char command) {
     stopMotors();
   }else if(command == 't'){
     int angle = Serial.parseInt();
-    turnLeftAngle(angle);
+    turnToAngle(angle, LEFT);
   }else{
-    Serial.println("Invalid command");
+    Serial.println("Invalid command"); 
   }
 }
 
@@ -203,24 +214,15 @@ void stopMotors() {
   isMoving = false;
 }
 
-// Function to turn the car to left by a given angle
-void turnLeftAngle(float angle) {
+void turnToAngle(float angle,bool direction){
   long steps = angle * STEPS_PER_DEGREE;
-  stepper1.move(-steps);
-  stepper2.move(steps);
-  while (stepper1.distanceToGo() != 0 || stepper2.distanceToGo() != 0) {
-    stepper1.run();
-    stepper2.run();
+  if(direction == RIGHT){
+    stepper1.move(steps);
+    stepper2.move(-steps);
+  }else{
+    stepper1.move(-steps);
+    stepper2.move(steps);
   }
-}
-
-// Function to turn the car to right by a given angle
-void turnRightAngle(float angle) {
-  long steps = angle * STEPS_PER_DEGREE;
-  Serial.print("steps");
-  Serial.println(steps);
-  stepper1.move(steps);
-  stepper2.move(-steps);
   while (stepper1.distanceToGo() != 0 || stepper2.distanceToGo() != 0) {
     stepper1.run();
     stepper2.run();
